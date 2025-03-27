@@ -18,11 +18,14 @@ import androidx.core.content.ContextCompat;
 
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Settings;
 import android.util.Log;
 import android.util.SparseArray;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.Enumeration;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -123,7 +126,7 @@ public class FlutterBluetoothSerialPlugin implements FlutterPlugin, ActivityAwar
                             case BluetoothDevice.PAIRING_VARIANT_PIN:
                                 // Simplest method - 4 digit number
                             {
-                                final BroadcastReceiver.PendingResult broadcastResult = this.goAsync();
+                                final PendingResult broadcastResult = this.goAsync();
 
                                 Map<String, Object> arguments = new HashMap<String, Object>();
                                 arguments.put("address", device.getAddress());
@@ -186,7 +189,7 @@ public class FlutterBluetoothSerialPlugin implements FlutterPlugin, ActivityAwar
                                 arguments.put("variant", pairingVariant);
                                 arguments.put("pairingKey", pairingKey);
 
-                                final BroadcastReceiver.PendingResult broadcastResult = this.goAsync();
+                                final PendingResult broadcastResult = this.goAsync();
                                 methodChannel.invokeMethod("handlePairingRequest", arguments, new MethodChannel.Result() {
                                     @SuppressLint("MissingPermission")
                                     @Override
@@ -476,7 +479,7 @@ public class FlutterBluetoothSerialPlugin implements FlutterPlugin, ActivityAwar
     /// Helper function to check is device connected
     static private boolean checkIsDeviceConnected(BluetoothDevice device) {
         try {
-            java.lang.reflect.Method method;
+            Method method;
             method = device.getClass().getMethod("isConnected");
             return (boolean) (Boolean) method.invoke(device);
         } catch (Exception ex) {
@@ -581,7 +584,7 @@ public class FlutterBluetoothSerialPlugin implements FlutterPlugin, ActivityAwar
                     break;
 
                 case "openSettings":
-                    ContextCompat.startActivity(activity, new Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS), null);
+                    ContextCompat.startActivity(activity, new Intent(Settings.ACTION_BLUETOOTH_SETTINGS), null);
                     result.success(null);
                     break;
 
@@ -622,7 +625,7 @@ public class FlutterBluetoothSerialPlugin implements FlutterPlugin, ActivityAwar
                             Log.d(TAG, "Trying to obtain address using Settings Secure bank");
                             try {
                                 // Requires `LOCAL_MAC_ADDRESS` which could be unavailible for third party applications...
-                                String value = android.provider.Settings.Secure.getString(activeContext.getContentResolver(), "bluetooth_address");
+                                String value = Settings.Secure.getString(activeContext.getContentResolver(), "bluetooth_address");
                                 if (value == null) {
                                     throw new NullPointerException("null returned, might be no permissions problem");
                                 }
@@ -637,7 +640,7 @@ public class FlutterBluetoothSerialPlugin implements FlutterPlugin, ActivityAwar
                             Log.d(TAG, "Trying to obtain address using reflection against internal Android code");
                             try {
                                 // This will most likely work, but well, it is unsafe
-                                java.lang.reflect.Field mServiceField;
+                                Field mServiceField;
                                 mServiceField = bluetoothAdapter.getClass().getDeclaredField("mService");
                                 mServiceField.setAccessible(true);
 
@@ -648,7 +651,7 @@ public class FlutterBluetoothSerialPlugin implements FlutterPlugin, ActivityAwar
                                     }
                                     throw new NullPointerException();
                                 }
-                                java.lang.reflect.Method getAddressMethod;
+                                Method getAddressMethod;
                                 getAddressMethod = bluetoothManagerService.getClass().getMethod("getAddress");
                                 String value = (String) getAddressMethod.invoke(bluetoothManagerService);
                                 if (value == null) {
@@ -784,7 +787,7 @@ public class FlutterBluetoothSerialPlugin implements FlutterPlugin, ActivityAwar
                     }
 
                     try {
-                        java.lang.reflect.Method method;
+                        Method method;
                         method = device.getClass().getMethod("removeBond");
                         boolean value = (Boolean) method.invoke(device);
                         result.success(value);
@@ -1010,23 +1013,25 @@ public class FlutterBluetoothSerialPlugin implements FlutterPlugin, ActivityAwar
                     Log.d(TAG, "Connecting to " + address + " (id: " + id + ")");
                     ExecutorService executor = Executors.newSingleThreadExecutor();
                     Handler handler = new Handler(Looper.getMainLooper());
-
                     executor.execute(() -> {
                         //Background work here
                         boolean resOK = false;
+                        Exception exception = new Exception();
                         try {
                             connection.connect(address);
                             resOK = true;
                         } catch (Exception ex) {
+                            exception = ex;
                             resOK = false;
                             connections.remove(id);
                         }
                         boolean finalResOK = resOK;
+                        Exception finalException = exception;
                         handler.post(() -> {
                             if (finalResOK) {
                                 activity.runOnUiThread(() -> result.success(id));
                             } else {
-                                activity.runOnUiThread(() -> result.error("connect_error", ex.getMessage(), exceptionToString(ex)));
+                                activity.runOnUiThread(() -> result.error("connect_error", finalException.getMessage(), exceptionToString(finalException)));
                             }
                             //UI Thread work here
 
@@ -1084,18 +1089,21 @@ public class FlutterBluetoothSerialPlugin implements FlutterPlugin, ActivityAwar
         executor.execute(() -> {
             //Background work here
             boolean resOK = false;
+            Exception exception = new Exception();
             try {
                 connection.write(data);
                 resOK = true;
             } catch (Exception ex) {
+                exception = ex;
                 resOK = false;
             }
             boolean finalResOK = resOK;
+            Exception finalException = exception;
             handler.post(() -> {
                 if (finalResOK) {
                     activity.runOnUiThread(() -> result.success(null));
                 } else {
-                    activity.runOnUiThread(() -> result.error("write_error", ex.getMessage(), exceptionToString(ex)));
+                        activity.runOnUiThread(() -> result.error("write_error", finalException.getMessage(), exceptionToString(finalException)));
                 }
                 //UI Thread work here
 
