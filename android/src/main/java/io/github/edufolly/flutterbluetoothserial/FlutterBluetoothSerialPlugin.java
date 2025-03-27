@@ -16,9 +16,10 @@ import androidx.annotation.NonNull;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 import android.util.SparseArray;
-import android.os.AsyncTask;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -28,6 +29,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.net.NetworkInterface;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import io.flutter.embedding.engine.plugins.FlutterPlugin;
 import io.flutter.embedding.engine.plugins.activity.ActivityAware;
@@ -319,7 +322,7 @@ public class FlutterBluetoothSerialPlugin implements FlutterPlugin, ActivityAwar
         messenger = binding.getBinaryMessenger();
 
         methodChannel = new MethodChannel(messenger, PLUGIN_NAMESPACE + "/methods");
-        methodChannel.setMethodCallHandler( new FlutterBluetoothSerialMethodCallHandler() );
+        methodChannel.setMethodCallHandler(new FlutterBluetoothSerialMethodCallHandler());
 
         EventChannel stateChannel = new EventChannel(messenger, PLUGIN_NAMESPACE + "/state");
 
@@ -511,7 +514,11 @@ public class FlutterBluetoothSerialPlugin implements FlutterPlugin, ActivityAwar
                     self.disconnect();
 
                     // True dispose
-                    AsyncTask.execute(() -> {
+                    ExecutorService executor = Executors.newSingleThreadExecutor();
+                    Handler handler = new Handler(Looper.getMainLooper());
+
+                    executor.execute(() -> {
+                        //Background work here
                         readChannel.setStreamHandler(null);
                         connections.remove(id);
 
@@ -1001,16 +1008,31 @@ public class FlutterBluetoothSerialPlugin implements FlutterPlugin, ActivityAwar
                     connections.put(id, connection);
 
                     Log.d(TAG, "Connecting to " + address + " (id: " + id + ")");
+                    ExecutorService executor = Executors.newSingleThreadExecutor();
+                    Handler handler = new Handler(Looper.getMainLooper());
 
-                    AsyncTask.execute(() -> {
+                    executor.execute(() -> {
+                        //Background work here
+                        boolean resOK = false;
                         try {
                             connection.connect(address);
-                            activity.runOnUiThread(() -> result.success(id));
+                            resOK = true;
                         } catch (Exception ex) {
-                            activity.runOnUiThread(() -> result.error("connect_error", ex.getMessage(), exceptionToString(ex)));
+                            resOK = false;
                             connections.remove(id);
                         }
+                        boolean finalResOK = resOK;
+                        handler.post(() -> {
+                            if (finalResOK) {
+                                activity.runOnUiThread(() -> result.success(id));
+                            } else {
+                                activity.runOnUiThread(() -> result.error("connect_error", ex.getMessage(), exceptionToString(ex)));
+                            }
+                            //UI Thread work here
+
+                        });
                     });
+
                     break;
                 }
 
@@ -1036,24 +1058,11 @@ public class FlutterBluetoothSerialPlugin implements FlutterPlugin, ActivityAwar
 
                     if (call.hasArgument("string")) {
                         String string = call.argument("string");
-                        AsyncTask.execute(() -> {
-                            try {
-                                connection.write(string.getBytes());
-                                activity.runOnUiThread(() -> result.success(null));
-                            } catch (Exception ex) {
-                                activity.runOnUiThread(() -> result.error("write_error", ex.getMessage(), exceptionToString(ex)));
-                            }
-                        });
+                        processWrite(result, connection, string.getBytes());
+
                     } else if (call.hasArgument("bytes")) {
                         byte[] bytes = call.argument("bytes");
-                        AsyncTask.execute(() -> {
-                            try {
-                                connection.write(bytes);
-                                activity.runOnUiThread(() -> result.success(null));
-                            } catch (Exception ex) {
-                                activity.runOnUiThread(() -> result.error("write_error", ex.getMessage(), exceptionToString(ex)));
-                            }
-                        });
+                        processWrite(result, connection, bytes);
                     } else {
                         result.error("invalid_argument", "there must be 'string' or 'bytes' argument", null);
                     }
@@ -1066,5 +1075,31 @@ public class FlutterBluetoothSerialPlugin implements FlutterPlugin, ActivityAwar
             }
         }
 
+    }
+
+    private void processWrite(Result result, BluetoothConnection connection, byte[] data) {
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        Handler handler = new Handler(Looper.getMainLooper());
+
+        executor.execute(() -> {
+            //Background work here
+            boolean resOK = false;
+            try {
+                connection.write(data);
+                resOK = true;
+            } catch (Exception ex) {
+                resOK = false;
+            }
+            boolean finalResOK = resOK;
+            handler.post(() -> {
+                if (finalResOK) {
+                    activity.runOnUiThread(() -> result.success(null));
+                } else {
+                    activity.runOnUiThread(() -> result.error("write_error", ex.getMessage(), exceptionToString(ex)));
+                }
+                //UI Thread work here
+
+            });
+        });
     }
 }
