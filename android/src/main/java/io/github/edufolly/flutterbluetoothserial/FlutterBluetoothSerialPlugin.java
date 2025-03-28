@@ -32,8 +32,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.net.NetworkInterface;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 import io.flutter.embedding.engine.plugins.FlutterPlugin;
 import io.flutter.embedding.engine.plugins.activity.ActivityAware;
@@ -517,16 +515,10 @@ public class FlutterBluetoothSerialPlugin implements FlutterPlugin, ActivityAwar
                     self.disconnect();
 
                     // True dispose
-                    ExecutorService executor = Executors.newSingleThreadExecutor();
-                    Handler handler = new Handler(Looper.getMainLooper());
+                    readChannel.setStreamHandler(null);
+                    connections.remove(id);
 
-                    executor.execute(() -> {
-                        //Background work here
-                        readChannel.setStreamHandler(null);
-                        connections.remove(id);
-
-                        Log.d(TAG, "Disconnected (id: " + id + ")");
-                    });
+                    Log.d(TAG, "Disconnected (id: " + id + ")");
                 }
             };
             readChannel.setStreamHandler(readStreamHandler);
@@ -1011,32 +1003,26 @@ public class FlutterBluetoothSerialPlugin implements FlutterPlugin, ActivityAwar
                     connections.put(id, connection);
 
                     Log.d(TAG, "Connecting to " + address + " (id: " + id + ")");
-                    ExecutorService executor = Executors.newSingleThreadExecutor();
-                    Handler handler = new Handler(Looper.getMainLooper());
-                    executor.execute(() -> {
-                        //Background work here
-                        boolean resOK = false;
-                        Exception exception = new Exception();
-                        try {
-                            connection.connect(address);
-                            resOK = true;
-                        } catch (Exception ex) {
-                            exception = ex;
-                            resOK = false;
-                            connections.remove(id);
-                        }
-                        boolean finalResOK = resOK;
-                        Exception finalException = exception;
-                        handler.post(() -> {
-                            if (finalResOK) {
-                                activity.runOnUiThread(() -> result.success(id));
-                            } else {
-                                activity.runOnUiThread(() -> result.error("connect_error", finalException.getMessage(), exceptionToString(finalException)));
-                            }
-                            //UI Thread work here
+                    //Background work here
+                    boolean resOK = false;
+                    Exception exception = new Exception();
+                    try {
+                        connection.connect(address);
+                        resOK = true;
+                    } catch (Exception ex) {
+                        exception = ex;
+                        resOK = false;
+                        connections.remove(id);
+                    }
+                    boolean finalResOK = resOK;
+                    Exception finalException = exception;
+                    if (finalResOK) {
+                        activity.runOnUiThread(() -> result.success(id));
+                    } else {
+                        activity.runOnUiThread(() -> result.error("connect_error", finalException.getMessage(), exceptionToString(finalException)));
+                    }
+                    //UI Thread work here
 
-                        });
-                    });
 
                     break;
                 }
@@ -1083,31 +1069,25 @@ public class FlutterBluetoothSerialPlugin implements FlutterPlugin, ActivityAwar
     }
 
     private void processWrite(Result result, BluetoothConnection connection, byte[] data) {
-        ExecutorService executor = Executors.newSingleThreadExecutor();
-        Handler handler = new Handler(Looper.getMainLooper());
 
-        executor.execute(() -> {
-            //Background work here
-            boolean resOK = false;
-            Exception exception = new Exception();
-            try {
-                connection.write(data);
-                resOK = true;
-            } catch (Exception ex) {
-                exception = ex;
-                resOK = false;
-            }
-            boolean finalResOK = resOK;
-            Exception finalException = exception;
-            handler.post(() -> {
-                if (finalResOK) {
-                    activity.runOnUiThread(() -> result.success(null));
-                } else {
-                        activity.runOnUiThread(() -> result.error("write_error", finalException.getMessage(), exceptionToString(finalException)));
-                }
-                //UI Thread work here
+        //Background work here
+        boolean resOK = false;
+        Exception exception = new Exception();
+        try {
+            connection.write(data);
+            resOK = true;
+        } catch (Exception ex) {
+            exception = ex;
+            resOK = false;
+        }
+        boolean finalResOK = resOK;
+        Exception finalException = exception;
+        if (finalResOK) {
+            activity.runOnUiThread(() -> result.success(null));
+        } else {
+            activity.runOnUiThread(() -> result.error("write_error", finalException.getMessage(), exceptionToString(finalException)));
+        }
+        //UI Thread work here
 
-            });
-        });
     }
 }
